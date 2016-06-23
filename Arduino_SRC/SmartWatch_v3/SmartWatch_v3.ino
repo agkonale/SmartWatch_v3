@@ -33,7 +33,6 @@ bool PEDOMETER_SETUP_FLAG=false;
 //Current page pointer
 volatile uint8_t Page_ptr=HOME_PAGE;
 
-
 //To check if data is recieved from REMOTE
 bool isReceived = false;     
 //Connection Status with Android phone
@@ -273,12 +272,12 @@ void loop()
         //cylce counter
         uint8_t temp=0;
         //Load User Specific Alarm waveform stored in EEPROM
-        uint8_t num=EEPROM.read(55);
+        uint8_t num=EEPROM.read(addDRVnum);
         uint8_t buf[7];
     
         for (uint8_t i = 0; i < num; i++)
         {
-            buf[i]=EEPROM.read(56+i);
+            buf[i]=EEPROM.read(addDRVeffects+i);
         }
     
         while(ALRM_ON_OFF==true)
@@ -659,46 +658,46 @@ void parseCommand(byte c)
 
 void parseTime(byte c) 
 {  
-  if(TR_COMMAND == CMD_TYPE_SET_TIME) 
-  {    
-      if(timeParsingIndex < TIME_BUFFER_MAX) 
-    {
-        timeBuffer[timeParsingIndex] = (int)c;
-        timeParsingIndex++;
+    if(TR_COMMAND == CMD_TYPE_SET_TIME) 
+    {    
+        if(timeParsingIndex < TIME_BUFFER_MAX) 
+        {
+            timeBuffer[timeParsingIndex] = (int)c;
+            timeParsingIndex++;
+        }
+    
+        else
+        {
+            processTransaction();
+            TRANSACTION_POINTER = TR_MODE_WAIT_COMPLETE;
+        }
     }
-  
-    else
-    {
-        processTransaction();
-        TRANSACTION_POINTER = TR_MODE_WAIT_COMPLETE;
-    }
-  }
 }
 
 
 void parseAlarmTime(byte c) 
 {
 
-  if(TR_COMMAND == CMD_TYPE_SET_ALARM_TIME) 
-  {       
-      if(alarmTimeParsingIndex < ALARM_TIME_BUFFER_MAX) 
-    {
-        alarmTimeBuffer[alarmTimeParsingIndex] = (int)c;
-        alarmTimeParsingIndex++;
+    if(TR_COMMAND == CMD_TYPE_SET_ALARM_TIME) 
+    {       
+        if(alarmTimeParsingIndex < ALARM_TIME_BUFFER_MAX) 
+        {
+            alarmTimeBuffer[alarmTimeParsingIndex] = (int)c;
+            alarmTimeParsingIndex++;
+        }
+    
+        else
+        {
+            processTransaction();
+            TRANSACTION_POINTER = TR_MODE_WAIT_COMPLETE;
+        }
     }
-  
-    else
-    {
-        processTransaction();
-        TRANSACTION_POINTER = TR_MODE_WAIT_COMPLETE;
-    }
-  }
 }
 
 
 
-void processTransaction() {
-
+void processTransaction() 
+{
     switch(TR_COMMAND)
     {
         case CMD_TYPE_SET_TIME:
@@ -712,8 +711,7 @@ void processTransaction() {
         alarm_minute=alarmTimeBuffer[2];
         alarmTimeParsingIndex = 0;
         break;
-    }
-    
+    }  
 }
  
 void SetTime(char timeBuffer[4])

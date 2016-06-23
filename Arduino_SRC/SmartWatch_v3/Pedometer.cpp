@@ -96,10 +96,11 @@ void Pedometer_Data::RESET()
     Calories=0;
 }
 
+/*
 void Pedometer_Data::STORE()
 {
     EEPROM.put(addStp,StepCount);
     EEPROM.put(addCal,Calories);
     EEPROM.put(addKm,KM);
 }
-
+*/

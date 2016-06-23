@@ -24,8 +24,10 @@ class Pedometer_Data
     //Constructor
     Pedometer_Data()
     {      
-        Height=EEPROM.read(addHeight);
-        Weight=EEPROM.read(addWeight);
+        //Height=EEPROM.read(addHeight);
+        //Weight=EEPROM.read(addWeight);
+        Height=176;
+        Weight=82;
         StepCount=0;
         StepCount_Prev=0;
         Steps_per_2s=0;
@@ -44,7 +46,7 @@ class Pedometer_Data
     void Update_KM();
     void Get_Steps_Cal_Dist(long &Steps,float &Cal, float &Dist);
     void RESET();
-    void STORE();
+    //void STORE();
     
 };
 

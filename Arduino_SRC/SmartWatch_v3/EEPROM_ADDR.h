@@ -16,10 +16,13 @@
 #define addCal 32 //address to store number of calories 
 #define addKm  36 //address to store number of km 
 
-#define addHeight 41
-#define addAge    42
-#define addGender 43
-#define addWeight 44
-#define addName   45  //10 byte char Array
+#define addHeight 40
+#define addAge    41
+#define addGender 42
+#define addWeight 43
+#define addName   44  //10 byte char Array
+
+#define addDRVnum 54 //Number of effects
+#define addDRVeffects 55 //effect ids
 
 #endif

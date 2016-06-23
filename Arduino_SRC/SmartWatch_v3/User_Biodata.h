@@ -14,8 +14,8 @@ class USER_BIODATA
     uint8_t Weight; //in Kg
 
     public:
-    USER_BIODATA();
-    void Store_BIODATA();
+    //USER_BIODATA();
+    //void Store_BIODATA();
     void Set_BIODATA(char Name[10],uint8_t Height, uint8_t Age,bool Gender,uint8_t Weight);
 };
 

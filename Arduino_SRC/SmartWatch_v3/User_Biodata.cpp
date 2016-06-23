@@ -1,5 +1,6 @@
 #include "User_Biodata.h"
 
+/*
 USER_BIODATA::USER_BIODATA()
 {
     Height=EEPROM.read(addHeight);
@@ -25,6 +26,9 @@ void USER_BIODATA::Store_BIODATA()
     }
 }
 
+*/
+
+
 void USER_BIODATA::Set_BIODATA(char Name[10],uint8_t Height, uint8_t Age,bool Gender,uint8_t Weight)
 {
     Height=Height;
@@ -33,3 +37,4 @@ void USER_BIODATA::Set_BIODATA(char Name[10],uint8_t Height, uint8_t Age,bool Ge
     Weight=Weight;
     Name=Name;
 }
+

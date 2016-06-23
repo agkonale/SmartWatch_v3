@@ -91,7 +91,7 @@ void Sensors::Get_Temp_Pressure_Alt(float &temperature,float &pressure,float &al
     temperature= barometer.getTemperatureC();
 
     // request pressure 
-    //MODES,conv delay: 3:Ultra High Res [25.5],2:High Res [13.5],1:Standard [7.5], 0:Ultra Low Power [4.5]
+    // MODES,conv delay: 3:Ultra High Res [25.5],2:High Res [13.5],1:Standard [7.5], 0:Ultra Low Power [4.5]
     barometer.setControl(BMP085_MODE_PRESSURE_1);
     delay(8);
     // read calibrated pressure value in Pascals (Pa)
