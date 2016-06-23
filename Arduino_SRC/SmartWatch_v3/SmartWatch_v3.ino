@@ -1,0 +1,763 @@
+#include <DS3231.h>
+#include "DRV2605.h"
+#include "Sensors.h"
+#include "OLED.h"
+#include "Power_Management.h"
+#include "User_Biodata.h"
+#include "Pedometer.h"
+
+//Watch Mode:   
+#define NORMAL_MODE 0
+#define PEDOMETER_MODE 1
+volatile uint8_t WATCH_MODE=NORMAL_MODE;
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//-----BLE Protocol
+
+//----- Bluetooth transaction parsing
+#define TR_MODE_IDLE 0x11
+#define TR_MODE_WAIT_CMD 0x21
+#define TR_MODE_WAIT_MESSAGE 0x31
+#define TR_MODE_WAIT_TIME 0x41
+#define TR_MODE_WAIT_ALARM_TIME 0x51
+#define TR_MODE_WAIT_COMPLETE 0x61
+
+#define TRANSACTION_START_BYTE 0xfc
+#define TRANSACTION_END_BYTE 0xfd
+
+#define CMD_TYPE_NONE 0x00
+#define CMD_TYPE_SET_TIME 0x10
+#define CMD_TYPE_SET_ALARM_TIME 0x20
+#define CMD_TYPE_SET_ALARM_1 0x30
+#define CMD_TYPE_SET_ALARM_2 0x40
+#define CMD_TYPE_ALARM_ON 0x50
+#define CMD_TYPE_ALARM_OFF 0x60
+#define CMD_TYPE_MESSAGE_RECIEVED 0x70
+#define CMD_TYPE_INCOMING_CALL 0x80
+#define CMD_TYPE_GET_PEDOMETER_DATA 0x90
+#define CMD_TYPE_RESET_PEDOMETER_DATA 0xf0
+
+uint8_t alarm_day = 0;
+uint8_t alarm_hour = 0;
+uint8_t alarm_minute = 0;
+
+byte TRANSACTION_POINTER = TR_MODE_IDLE;
+byte TR_COMMAND = CMD_TYPE_NONE;
+
+
+#define TIME_BUFFER_MAX 4
+char timeParsingIndex = 0;
+char timeBuffer[4] ;
+
+#define ALARM_TIME_BUFFER_MAX 3
+char alarmTimeParsingIndex = 0;
+char alarmTimeBuffer[3] ;
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+#define SCREEN_REFRESH_INTERVAL 200 //ms
+
+//Awake time counter(1u = SCREEN_REFRESH_INTERVAL)
+uint8_t count=0;
+#define count_MAX 50 //10 sec
+
+//For MPU6050 Setup
+bool NORMAL_SETUP_FLAG=false;
+bool PEDOMETER_SETUP_FLAG=false;
+
+//Page ptr:
+#define HOME_PAGE             0x0
+#define PEDOMETER_PAGE        0x1
+#define COMPASS_PAGE          0X2
+#define BLANK_PAGE            0xA
+
+//Current page pointer
+volatile uint8_t Page_ptr=HOME_PAGE;
+
+
+//To check if data is recieved from REMOTE
+bool isReceived = false;     
+//Connection Status with Android phone
+bool is_Connected=false; 
+
+/////////////////////////////////////////////////////////PINS//////////////////////////////////////////////////////////////
+
+#define ALARM_INTPIN 2                //Alarm Interrupt Pin (INT0)
+#define ACC_INTPIN 3                  //For counting steps/Wake on Tilt(other applications requiring accelerometer)  (INT1) 
+
+#define ON_OFF_INTPIN 8               //To stop Alarm vibration/To Wake up the screen (PCINT0)
+#define Button1_INTPIN 9              //UI Button 1 (PCINT0)
+#define Button2_INTPIN 10             //UI Button 2 (PCINT0)
+
+#define BATTERY_SENSE_PIN A0          //select the input pin for the battery sense point
+
+#define USB_CHARGING_STAT_PIN 4       //USB Connection status
+#define BLE_CONNECTION_STAT_PIN 5     //BLE Connection status
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+volatile bool ALRM_ON_OFF = false;
+volatile bool ALRM_TRIGGERED = false;
+bool is_ALRM_SET =false;
+
+//Waking up screen via INT(button/Acc)
+volatile bool Wake_via_INT=false;
+
+/////////////////////////////////////////////////////////////WDT/////////////////////////////////////////////////////////////////
+
+ISR (WDT_vect) 
+{
+    wdt_disable();  // disable watchdog
+    
+}  // end of WDT_vect
+
+///////////////////////////////////////////////////////////DATA////////////////////////////////////////////////////////////////
+
+USER_BIODATA USER;
+
+Pedometer_Data Pedo_DATA;
+
+/////////////////////////////////////////////////////Peripheral Devices///////////////////////////////////////////////////////
+
+DS3231 RTC;
+RTCDateTime Time;
+
+// A structure for controlling I2C OLED (128X64)
+U8GLIB_SSD1306_128X64 u8g(U8G_I2C_OPT_NONE|U8G_I2C_OPT_DEV_0);  // I2C / TWI 
+ 
+// A structure for controlling Haptic driver DRV2605
+Adafruit_DRV2605 drv;
+#define alrm_vibe_count_MAX 20
+
+//11 DOF sensor GY87
+Sensors GY_S;
+ 
+////////////////////////////////////////////////////////ISR////////////////////////////////////////////////////////////////////
+//Keep these as small as possible!!
+
+//For UI buttons(3)
+ISR (PCINT0_vect) 
+{  
+
+    if(digitalRead(ON_OFF_INTPIN)==0)
+    {
+        WATCH_MODE=NORMAL_MODE;
+        Page_ptr=HOME_PAGE;
+        Wake_via_INT=true;
+        ALRM_ON_OFF=false;
+    }
+  
+    else if(digitalRead(Button1_INTPIN)==0)
+    {   
+        WATCH_MODE=PEDOMETER_MODE;
+        Page_ptr=PEDOMETER_PAGE;     
+    }
+  
+    else if(digitalRead(Button2_INTPIN)==0)
+    {
+        Page_ptr=COMPASS_PAGE;    
+    }
+
+}
+
+//For DS3231
+void ISR_ALARM()
+{
+    ALRM_TRIGGERED=true;    
+}
+
+
+//For Acc
+void ISR_Update_StepCount()
+{
+    Pedo_DATA.Update_StepCount();
+}
+
+void ISR_Wake_Via_Acc()
+{
+    Wake_via_INT=true;
+    Page_ptr=HOME_PAGE;
+}
+
+
+/////////////////////////////////////////////////////////////////Li-Po Battery///////////////////////////////////////////////////////
+ 
+float Battery_Voltage;
+uint8_t Battery_Lvl;
+//Charging complete status
+bool is_Charged=false;
+//USB charging status
+bool is_Charging=false;
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+ 
+void setup() 
+{
+    //Set Baud Rate for BLE HM10
+    //Chosen to match Bootloader BAUD Rate of Arduino PRO-MINI for OTA programming
+    Serial.begin(57600);
+  
+    pinMode(ON_OFF_INTPIN, INPUT_PULLUP);
+    pinMode(Button1_INTPIN, INPUT_PULLUP);
+    pinMode(Button1_INTPIN, INPUT_PULLUP);
+    pinMode(USB_CHARGING_STAT_PIN, INPUT_PULLUP);
+    pinMode(BLE_CONNECTION_STAT_PIN, INPUT_PULLUP);  
+  
+    //Unused Pins (Set as Output :LOW to conserve power)
+    pinMode(6, OUTPUT);
+    pinMode(7, OUTPUT);
+    pinMode(11, OUTPUT);
+    pinMode(12, OUTPUT);
+    
+    digitalWrite(6, LOW);
+    digitalWrite(7, LOW);
+    digitalWrite(11, LOW);
+    digitalWrite(12, LOW);
+    
+    cli();    // switch interrupts off while messing with their settings  
+    PCICR =0x01;          // Enable PCINT0 interrupt
+    PCMSK0 = 0b00000111;  //Enable interrupts on Pins 8,9,10
+    sei();    // turn interrupts back on
+    
+    //Personalise
+    USER.Set_BIODATA("Abhishek  ",176,20,0,82);
+  
+    //Use internal precise 1v1 reference voltage for measuring battery volatge
+    analogReference(INTERNAL);
+    
+    // Initialize the I2C bus
+    Wire.begin();
+  
+    //Setup DRV2605
+    DRV2605_Setup(drv);
+    
+    //DS3231 alarm INT
+    attachInterrupt (0,ISR_ALARM,FALLING);
+
+    //Load alarms for present day  
+    Time=RTC.getDateTime();
+    uint8_t temp_day= Time.dayOfWeek;
+    // setAlarm1(Date or Day, Hour, Minute, Second, Mode, Armed = true)
+    RTC.setAlarm1(temp_day,EEPROM.read(temp_day),EEPROM.read(temp_day+1), 0,DS3231_MATCH_DY_H_M_S);
+    // setAlarm2(Date or Day, Hour, Minute, Mode, Armed = true)
+    RTC.setAlarm2(temp_day,EEPROM.read(temp_day+2),EEPROM.read(temp_day+3),DS3231_MATCH_DY_H_M);
+
+    //Set Display font
+    //u8g.setFont(u8g_font_fur14r);
+    u8g.setFont(u8g_font_profont15r);
+
+    //Launch Animation
+    u8g.firstPage();
+    do 
+    {
+    u8g.setColorIndex(1);
+    u8g.drawBox(5, 5, 118, 54);
+    u8g.setColorIndex(0);
+    u8g.drawBox(10, 10, 108, 44);
+    u8g.setColorIndex(1);
+    u8g.drawBox(15, 15, 98, 34);
+    u8g.setColorIndex(0);
+    u8g.drawBox(20, 20, 88, 24);
+    u8g.setColorIndex(1);
+    u8g.drawBox(25, 25, 78, 14);
+    delay(3000); 
+    } while ( u8g.nextPage() );
+    
+    //Display Logo
+    u8g.firstPage();
+    do 
+    {
+        setContrast(0xFF);        
+        drawLOGO(u8g);
+        delay(3000);
+        setContrast(0x02);
+    } while ( u8g.nextPage() );
+    
+    delay(5000);
+
+}
+
+
+void loop() 
+{     
+     
+    Battery_Voltage=Get_Battery_Voltage(A0);
+    Battery_Lvl=Get_Battery_Lvl(Battery_Voltage);
+
+    
+    uint8_t temp_day=Time.dayOfWeek; 
+    
+    Time=RTC.getDateTime();
+
+    //Loading stored alarms for new day 
+    if(temp_day!=Time.dayOfWeek and is_ALRM_SET==true)
+    {    
+        temp_day= Time.dayOfWeek;
+        // setAlarm1(Date or Day, Hour, Minute, Second, Mode, Armed = true)
+        RTC.setAlarm1(temp_day,EEPROM.read(temp_day),EEPROM.read(temp_day+1),0,DS3231_MATCH_DY_H_M_S);
+        // setAlarm2(Date or Day, Hour, Minute, Mode, Armed = true)
+        RTC.setAlarm2(temp_day,EEPROM.read(temp_day+2),EEPROM.read(temp_day+3),DS3231_MATCH_DY_H_M);
+
+    } 
+      
+    if(ALRM_TRIGGERED)
+    {      
+        //Display Alarm Icon  
+        u8g.drawBitmapP(80,16 ,4 ,32,ICON_BITMAP_Alarm_32x32);
+        //Time=RTC.getDateTime();
+        displayTime_Digital(u8g,Time);
+
+        //Reset flag
+        ALRM_TRIGGERED=false;             
+        ALRM_ON_OFF = true;
+        
+        //cylce counter
+        uint8_t temp=0;
+        //Load User Specific Alarm waveform stored in EEPROM
+        uint8_t num=EEPROM.read(55);
+        uint8_t buf[7];
+    
+        for (uint8_t i = 0; i < num; i++)
+        {
+            buf[i]=EEPROM.read(56+i);
+        }
+    
+        while(ALRM_ON_OFF==true)
+        {
+            Vibrate_A(drv,buf,num);
+            temp++;
+            if(temp>alrm_vibe_count_MAX)
+              {
+                  break;
+              }
+        }  
+    } 
+    
+
+
+    if(WATCH_MODE==NORMAL_MODE)
+    {
+        if(NORMAL_SETUP_FLAG==false)
+            {   
+                GY_S.Initialize(NORMAL_MODE);
+                attachInterrupt (1,ISR_Wake_Via_Acc,RISING); 
+                PEDOMETER_SETUP_FLAG=false; 
+                NORMAL_SETUP_FLAG=true; 
+            }
+        
+        // Receive data from remote and parse
+        isReceived = receiveBluetoothData();
+      
+        // If data doesn't arrive
+        if(!isReceived)
+        {
+          
+            is_Charging=digitalRead(USB_CHARGING_STAT_PIN);
+            is_Connected=digitalRead(BLE_CONNECTION_STAT_PIN);
+        
+            //Turn on watch only if screen is properly oriented or USB is connected or Wake button is pressed
+            if(is_Charging or Wake_via_INT)
+            {   
+                if(Wake_via_INT)
+                {
+                    count++;
+                    if(count>count_MAX)
+                    {
+                        Wake_via_INT=false;
+                        count=0;
+                    }
+                } 
+                 
+                Display(Page_ptr);        
+                delay(SCREEN_REFRESH_INTERVAL);   
+            }
+          
+            else
+            {      
+                //Turn off Display
+                Display(BLANK_PAGE);
+                //Sleep for 2s
+                //  1 second:  0b000110
+                //  2 seconds: 0b000111
+                //  4 seconds: 0b100000
+                //  8 seconds: 0b100001
+                Sleep(0b000111);      
+            }  
+        
+      }
+      
+    }
+  
+  
+  
+    if(WATCH_MODE==PEDOMETER_MODE)
+    {
+      
+        if(PEDOMETER_SETUP_FLAG==false)
+        {
+            GY_S.Initialize(PEDOMETER_MODE);
+            attachInterrupt (1,ISR_Update_StepCount,RISING); 
+            NORMAL_SETUP_FLAG=false;   
+            PEDOMETER_SETUP_FLAG=true; 
+        }
+        
+        //PedoMeter algorithm
+
+        Pedo_DATA.Update_Steps_per_2s();
+        Pedo_DATA.Update_Stride_Length();
+        Pedo_DATA.Update_Speed();
+        Pedo_DATA.Update_Calories();
+        Pedo_DATA.Update_KM(); 
+    
+        //Display data on screen
+        Display(Page_ptr);
+           
+        int i=0;
+        while(i<20)
+        {
+            i++;
+            delay(50);
+        }
+        
+  }
+
+}
+
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void Display(uint8_t Page_ptr)
+{
+    switch (Page_ptr)
+    {
+        //////////////////////////////////////////////////////////HOME-PAGE///////////////////////////////////////////////////////////////////      
+        case HOME_PAGE:
+        //Time=RTC.getDateTime();
+        displayTime_Analog(u8g,Time);
+        displayTime_Digital(u8g,Time);
+        displayHomeScreenData(u8g,GY_S);
+        
+        switch (Battery_Lvl)
+        {
+            case 3:
+            u8g.drawBitmapP(0, 0, 2, 16, ICON_BITMAP_Batt_Lvl_3);
+            break;
+  
+            case 2:
+            u8g.drawBitmapP(0, 0, 2, 16, ICON_BITMAP_Batt_Lvl_2);
+            break;
+  
+            case 1:
+            u8g.drawBitmapP(0, 0, 2, 16, ICON_BITMAP_Batt_Lvl_1);
+            break;
+  
+            case 0:
+            u8g.drawBitmapP(0, 0, 2, 16, ICON_BITMAP_Batt_Lvl_0);
+            break;
+        }
+
+        if (is_Connected)
+        {          
+            u8g.drawBitmapP(16, 0, 2, 16,ICON_BITMAP_Bluetooth);                   
+        }
+
+
+        if (is_Charging)
+        {           
+            u8g.drawBitmapP(32, 0, 2, 16,ICON_BITMAP_Charging);           
+        }
+
+        if (is_ALRM_SET)
+        {
+            u8g.drawBitmapP(48, 0, 2, 16, ICON_BITMAP_Alarm_16x16);
+        }
+        break;
+
+       
+        //////////////////////////////////////////////////////////PEDOMETER-PAGE//////////////////////////////////////////////////////////////
+        case PEDOMETER_PAGE:
+        //Time=RTC.getDateTime();
+        displayTime_Digital(u8g,Time);
+        displayPedometerData(u8g,Pedo_DATA); 
+          
+        switch (Battery_Lvl)
+        {
+            case 3:
+            u8g.drawBitmapP(0, 0, 2, 16, ICON_BITMAP_Batt_Lvl_3);
+            break;
+  
+            case 2:
+            u8g.drawBitmapP(0, 0, 2, 16, ICON_BITMAP_Batt_Lvl_2);
+            break;
+  
+            case 1:
+            u8g.drawBitmapP(0, 0, 2, 16, ICON_BITMAP_Batt_Lvl_1);
+            break;
+  
+            case 0:
+            u8g.drawBitmapP(0, 0, 2, 16, ICON_BITMAP_Batt_Lvl_0);
+            break;
+        } 
+        break;
+
+        //////////////////////////////////////////////////////////COMPASS-PAGE////////////////////////////////////////////////////////////////
+        case COMPASS_PAGE:
+        displayCompass(u8g,GY_S);
+        break;
+
+        //////////////////////////////////////////////////////////BLANK-PAGE/////////////////////////////////////////////////////////////////
+        case BLANK_PAGE:
+        u8g.firstPage();
+        do  
+        {       
+        } 
+        while ( u8g.nextPage() );
+        break;
+                      
+    }
+  
+     
+        
+}
+
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//----- BT, Data parsing functions
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+// Parsing packet according to current mode
+boolean receiveBluetoothData() 
+{
+    bool isTransactionEnded = false;
+    
+    while(!isTransactionEnded) 
+    {
+        if(Serial.available()) 
+        {
+            byte c = Serial.read();
+
+            switch(TRANSACTION_POINTER)
+            {
+                case TR_MODE_IDLE:
+                if(c == TRANSACTION_START_BYTE) 
+                {
+                    TRANSACTION_POINTER = TR_MODE_WAIT_CMD;
+                    TR_COMMAND = CMD_TYPE_NONE;
+                }
+                break;
+
+                case TR_MODE_WAIT_CMD:
+                parseCommand(c);
+                break;
+
+                case TR_MODE_WAIT_TIME:
+                parseTime(c);
+                break;
+
+                case TR_MODE_WAIT_ALARM_TIME:
+                parseAlarmTime(c);
+                break;
+
+                case TR_MODE_WAIT_COMPLETE:
+                if(c == TRANSACTION_END_BYTE) 
+                {
+                    TRANSACTION_POINTER = TR_MODE_IDLE;
+                    isTransactionEnded = true;
+                }
+
+                else
+                {
+                    isTransactionEnded = false;
+                }
+   
+                break;
+              
+            }          
+      }  
+      
+      else 
+      {
+          isTransactionEnded = true;
+      }
+      
+    }  // End of while()
+    return true;
+}  // End of receiveBluetoothData()
+
+
+
+
+
+    
+
+
+void parseCommand(byte c) 
+{
+
+    switch(c)
+    {
+        case CMD_TYPE_SET_TIME:
+        TRANSACTION_POINTER = TR_MODE_WAIT_TIME;
+        TR_COMMAND = c; 
+        break;
+
+        case CMD_TYPE_SET_ALARM_TIME:
+        TRANSACTION_POINTER = TR_MODE_WAIT_ALARM_TIME;
+        TR_COMMAND = c;
+        break;
+
+        case CMD_TYPE_SET_ALARM_1:
+        TRANSACTION_POINTER = TR_MODE_WAIT_COMPLETE;
+        TR_COMMAND = c;
+        // setAlarm1(Date or Day, Hour, Minute, Second, Mode, Armed = true)  
+        RTC.setAlarm1(alarm_day,alarm_hour,alarm_minute,0,DS3231_MATCH_DY_H_M_S);
+        EEPROM.write(alarm_day*4, alarm_hour);
+        EEPROM.write(alarm_day*4+1, alarm_minute);
+        break;
+
+        case CMD_TYPE_SET_ALARM_2:
+        TRANSACTION_POINTER = TR_MODE_WAIT_COMPLETE;
+        TR_COMMAND = c;
+        // setAlarm2(Date or Day, Hour, Minute, Mode, Armed = true)
+        RTC.setAlarm2(alarm_day,alarm_hour,alarm_minute,DS3231_MATCH_DY_H_M);
+        EEPROM.write(alarm_day*4+2, alarm_hour);
+        EEPROM.write(alarm_day*4+3, alarm_minute);        
+        break;
+
+        case CMD_TYPE_ALARM_ON:
+        TRANSACTION_POINTER = TR_MODE_WAIT_COMPLETE;
+        TR_COMMAND = c;
+        is_ALRM_SET=true;
+        break;
+
+        case CMD_TYPE_ALARM_OFF:
+        TRANSACTION_POINTER = TR_MODE_WAIT_COMPLETE;
+        TR_COMMAND = c;
+        is_ALRM_SET=false;
+        RTC.armAlarm1(false);
+        RTC.armAlarm2(false);
+        RTC.clearAlarm1();
+        RTC.clearAlarm2();
+        break;
+
+        case CMD_TYPE_MESSAGE_RECIEVED:
+        TRANSACTION_POINTER = TR_MODE_WAIT_COMPLETE;
+        TR_COMMAND = c;
+        u8g.firstPage();
+        do 
+        {   
+            u8g.drawBitmapP(32, 0, 8, 64, ICON_BITMAP_Message_Recieved_64x64);
+        } while ( u8g.nextPage() );
+        Vibrate_M(drv);
+        delay(3000); 
+        break;
+
+        case CMD_TYPE_INCOMING_CALL:
+        TRANSACTION_POINTER = TR_MODE_WAIT_COMPLETE;
+        TR_COMMAND = c;
+        u8g.firstPage();
+        do 
+        {   
+            u8g.drawBitmapP(40, 8, 6, 48, ICON_BITMAP_Incoming_Call_48x48);
+        } while ( u8g.nextPage() );
+        Vibrate_C(drv);
+        delay(3000); 
+        break;
+
+        case CMD_TYPE_GET_PEDOMETER_DATA:
+        TRANSACTION_POINTER = TR_MODE_WAIT_COMPLETE;
+        TR_COMMAND = c;
+        long StepCount;
+        float Calories,KM;
+        Pedo_DATA.Get_Steps_Cal_Dist(StepCount,Calories,KM);
+
+        Serial.println("S");
+        Serial.println(StepCount);
+
+        Serial.println("D");
+        Serial.println(KM,3);
+        
+        Serial.println("C");
+        Serial.println(Calories,3);
+        break;
+
+        case CMD_TYPE_RESET_PEDOMETER_DATA:
+        TRANSACTION_POINTER = TR_MODE_WAIT_COMPLETE;
+        TR_COMMAND = c;
+        Pedo_DATA.RESET();
+        break;
+        
+        default:
+        TRANSACTION_POINTER = TR_MODE_IDLE;
+        TR_COMMAND = CMD_TYPE_NONE;
+               
+    }
+    
+}
+
+
+
+void parseTime(byte c) 
+{  
+  if(TR_COMMAND == CMD_TYPE_SET_TIME) 
+  {    
+      if(timeParsingIndex < TIME_BUFFER_MAX) 
+    {
+        timeBuffer[timeParsingIndex] = (int)c;
+        timeParsingIndex++;
+    }
+  
+    else
+    {
+        processTransaction();
+        TRANSACTION_POINTER = TR_MODE_WAIT_COMPLETE;
+    }
+  }
+}
+
+
+void parseAlarmTime(byte c) 
+{
+
+  if(TR_COMMAND == CMD_TYPE_SET_ALARM_TIME) 
+  {       
+      if(alarmTimeParsingIndex < ALARM_TIME_BUFFER_MAX) 
+    {
+        alarmTimeBuffer[alarmTimeParsingIndex] = (int)c;
+        alarmTimeParsingIndex++;
+    }
+  
+    else
+    {
+        processTransaction();
+        TRANSACTION_POINTER = TR_MODE_WAIT_COMPLETE;
+    }
+  }
+}
+
+
+
+void processTransaction() {
+
+    switch(TR_COMMAND)
+    {
+        case CMD_TYPE_SET_TIME:
+        SetTime(timeBuffer);
+        timeParsingIndex = 0;
+        break;
+
+        case CMD_TYPE_SET_ALARM_TIME:
+        alarm_day=alarmTimeBuffer[0];
+        alarm_hour=alarmTimeBuffer[1];
+        alarm_minute=alarmTimeBuffer[2];
+        alarmTimeParsingIndex = 0;
+        break;
+    }
+    
+}
+ 
+void SetTime(char timeBuffer[4])
+{
+  
+}
