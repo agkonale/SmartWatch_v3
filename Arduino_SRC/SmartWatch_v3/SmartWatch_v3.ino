@@ -1,6 +1,6 @@
 #include <DS3231.h>
+#include "Motor.h"
 #include "BLE.h"
-#include "DRV2605.h"
 #include "Sensors.h"
 #include "OLED.h"
 #include "Power_Management.h"
@@ -36,10 +36,11 @@ bool is_Connected=false;  //Connection Status with Android phone
 /////////////////////////////////////////////////////////PINS///////////////////////////////////////////////////////////////
 
 //A4 (SDA), A5 (SCL)
+//PIN 6: Vibration Motor
 #define ALARM_INTPIN 2                //Alarm Interrupt Pin (INT0)
 #define ACC_INTPIN 3                  //For counting steps/Wake on Tilt(other applications requiring accelerometer)  (INT1) 
 
-#define ON_OFF_INTPIN 8               //To stop Alarm vibration/To Wake up the screen (PCINT0)
+#define ON_OFF_INTPIN 8               //To stop Alarm vibration/To Wake up the screen (PCINT0) //(pins D8 to D13)
 #define Button1_INTPIN 9              //UI Button 1 (PCINT0)
 #define Button2_INTPIN 10             //UI Button 2 (PCINT0)
 
@@ -53,8 +54,10 @@ bool is_Connected=false;  //Connection Status with Android phone
 volatile bool ALRM_ON_OFF = false;  //to disarm alarm
 volatile bool ALRM_TRIGGERED = false;
 bool is_ALRM_SET =false;
+#define alrm_vibe_count_MAX 20
 
 volatile bool Wake_via_INT=false; //Waking up screen via INT(button/Acc)
+volatile bool ACC_INT_FLAG =false;
 
 /////////////////////////////////////////////////////////////WDT/////////////////////////////////////////////////////////////////
 
@@ -75,11 +78,7 @@ RTCDateTime Time;
 
 U8GLIB_SSD1306_128X64 u8g(U8G_I2C_OPT_NONE|U8G_I2C_OPT_DEV_0);  // A structure for controlling I2C OLED (128X64)  // I2C / TWI 
  
-Adafruit_DRV2605 drv; // A structure for controlling Haptic driver DRV2605
-#define alrm_vibe_count_MAX 20
-
 Sensors GY_S; //11 DOF sensor GY87
-volatile bool ACC_INT_FLAG =false;
 
 ////////////////////////////////////////////////////////ISR////////////////////////////////////////////////////////////////////
 //Keep these as small as possible!!
@@ -149,15 +148,14 @@ void setup()
     pinMode(Button1_INTPIN, INPUT_PULLUP);
     pinMode(Button1_INTPIN, INPUT_PULLUP);
     pinMode(USB_CHARGING_STAT_PIN, INPUT_PULLUP);
-    pinMode(BLE_CONNECTION_STAT_PIN, INPUT_PULLUP);  
+    pinMode(BLE_CONNECTION_STAT_PIN, INPUT_PULLUP); 
+    pinMode(VIB_MOTOR_PIN, OUTPUT); 
   
-    //Unused Pins (Set as Output :LOW to conserve power)
-    pinMode(6, OUTPUT);
+    //Unused Pins (Set as Output :LOW to conserve power)    
     pinMode(7, OUTPUT);
     pinMode(11, OUTPUT);
     pinMode(12, OUTPUT);
-    
-    digitalWrite(6, LOW);
+        
     digitalWrite(7, LOW);
     digitalWrite(11, LOW);
     digitalWrite(12, LOW);
@@ -166,15 +164,12 @@ void setup()
     PCICR =0x01;              // Enable PCINT0 interrupt
     PCMSK0 = 0b00000111;      //Enable interrupts on Pins 8,9,10
     sei();                    // turn interrupts back on
-    
-    //Personalise
-    USER.Set_BIODATA("Abhishek  ",176,20,0,82);
+      
+    USER.Set_BIODATA("Abhishek  ",176,20,0,82); //Personalise
      
     analogReference(INTERNAL);  //Use internal precise 1v1 reference voltage for measuring battery volatge
     
     Wire.begin();
-      
-    DRV2605_Setup(drv); //Setup DRV2605
         
     attachInterrupt (0,ISR_ALARM,FALLING);  //DS3231 alarm INT
 
@@ -235,28 +230,17 @@ void loop()
     } 
       
     if(ALRM_TRIGGERED)
-    {      
-         
-        u8g.drawBitmapP(80,16 ,4 ,32,ICON_BITMAP_Alarm_32x32);  // setAlarm2(Date or Day, Hour, Minute, Mode, Armed = true)
+    {              
+        u8g.drawBitmapP(80,16 ,4 ,32,ICON_BITMAP_Alarm_32x32);  
         displayTime_Digital(u8g,Time);
-
-        //Reset flag
-        ALRM_TRIGGERED=false;             
+       
+        ALRM_TRIGGERED=false; //Reset flag            
         ALRM_ON_OFF = true;
                
         uint8_t temp=0; //cylce counter
-        //Load User Specific Alarm waveform stored in EEPROM
-        uint8_t num=EEPROM.read(addDRVnum);
-        uint8_t buf[7];
-    
-        for (uint8_t i = 0; i < num; i++)
-        {
-            buf[i]=EEPROM.read(addDRVeffects+i);
-        }
-    
         while(ALRM_ON_OFF==true)
         {
-            Vibrate_A(drv,buf,num);
+            Vibrate_A();
             temp++;
             if(temp>alrm_vibe_count_MAX)
               {
@@ -345,7 +329,8 @@ void loop()
                 GY_S.Update_Threshold();  //Dynamic Threshold Update
             }
         }
-        
+
+        //Update Pedometer Data after 2s
         if(millis()-T2 >2000)
         {   
             T2 =millis();
@@ -574,7 +559,7 @@ void parseCommand(byte c)
         {   
             u8g.drawBitmapP(32, 0, 8, 64, ICON_BITMAP_Message_Recieved_64x64);
         } while ( u8g.nextPage() );
-        Vibrate_M(drv);
+        Vibrate_M();
         delay(3000); 
         break;
 
@@ -586,7 +571,7 @@ void parseCommand(byte c)
         {   
             u8g.drawBitmapP(40, 8, 6, 48, ICON_BITMAP_Incoming_Call_48x48);
         } while ( u8g.nextPage() );
-        Vibrate_C(drv);
+        Vibrate_C();
         delay(3000); 
         break;
 

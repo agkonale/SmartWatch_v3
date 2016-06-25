@@ -96,9 +96,8 @@ void Sensors::Update_Threshold()
 
 float Sensors::Get_Compass_Reading()
 {
-    int16_t mx, my, mz;
-    // read raw heading measurements from device
-    mag.getHeading(&mx, &my, &mz);
+    int16_t mx, my, mz; 
+    mag.getHeading(&mx, &my, &mz);  // read raw heading measurements from device
     
     float heading = atan2(my, mx);
     if(heading < 0)
