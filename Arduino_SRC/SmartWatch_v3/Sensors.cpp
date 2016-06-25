@@ -20,22 +20,21 @@ void Sensors::Initialize(uint8_t Mode)
         accelgyro.setDHPFMode(3); // high-pass filter configuration more than 1.25Hz pass
         accelgyro.setDLPFMode(5); // low-pass filter configuration below 10Hz pass
         
-        accelgyro.setMotionDetectionThreshold(threshold1);  
+        accelgyro.setMotionDetectionThreshold(threshold_N);  
         accelgyro.setMotionDetectionDuration(detcdur1); // motion detection duration threshold value (LSB = 1ms)   
-  
-        //Disable X,Y axis
-        accelgyro.setStandbyXAccelEnabled(1);
+      
+        accelgyro.setStandbyXAccelEnabled(1); //Disable X,Y axis
         accelgyro.setStandbyYAccelEnabled(1);
         
         delay(50); 
         break;
     
         case 1:
-        accelgyro.setDHPFMode(3); //New high-pass filter configuration more than 1.25Hz pass
+        accelgyro.setDHPFMode(4); //New high-pass filter configuration more than 0.63Hz pass
         accelgyro.setDLPFMode(5); //New low-pass filter configuration below 10Hz pass
         
-        accelgyro.setMotionDetectionThreshold(threshold2);  
-        accelgyro.setMotionDetectionDuration(detcdur2); // motion detection duration threshold value (LSB = 1ms) 
+        accelgyro.setMotionDetectionThreshold(threshold_P_MIN);  
+        accelgyro.setMotionDetectionDuration(detcdur2); // Motion detection duration threshold value (LSB = 1ms) 
         
         accelgyro.setStandbyXAccelEnabled(0);
         accelgyro.setStandbyYAccelEnabled(0);
@@ -64,6 +63,37 @@ void Sensors::Initialize(uint8_t Mode)
         delay(50);    
 }
 
+void Sensors::Update_Threshold()
+{
+    if(threshold_flag)
+    {   if(threshold_P < threshold_P_MAX)
+        {
+            threshold_P++;
+            accelgyro.setMotionDetectionThreshold(threshold_P);         
+        }
+        else
+        {
+            threshold_flag=false;
+        }        
+    }
+    
+    else
+    {   
+        if(threshold_P > threshold_P_MIN)  
+        {
+            threshold_P--;
+            accelgyro.setMotionDetectionThreshold(threshold_P);
+        }
+  
+        else
+        {
+            threshold_flag=true;
+        }          
+    }
+        
+}
+
+
 float Sensors::Get_Compass_Reading()
 {
     int16_t mx, my, mz;
@@ -84,18 +114,15 @@ float Sensors::Get_Compass_Reading()
 //Celsius/Pa/m
 void Sensors::Get_Temp_Pressure_Alt(float &temperature,float &pressure,float &altitude)
 {
-    // request temperature
-    barometer.setControl(BMP085_MODE_TEMPERATURE);   
-    delay(5);
-    // read calibrated temperature value in degrees Celsius
-    temperature= barometer.getTemperatureC();
-
-    // request pressure 
+    
+    barometer.setControl(BMP085_MODE_TEMPERATURE);  // request temperature
+    delay(5);    
+    temperature= barometer.getTemperatureC(); // read calibrated temperature value in degrees Celsius
+ 
     // MODES,conv delay: 3:Ultra High Res [25.5],2:High Res [13.5],1:Standard [7.5], 0:Ultra Low Power [4.5]
-    barometer.setControl(BMP085_MODE_PRESSURE_1);
-    delay(8);
-    // read calibrated pressure value in Pascals (Pa)
-    pressure= barometer.getPressure();
+    barometer.setControl(BMP085_MODE_PRESSURE_1); // request pressure 
+    delay(8);   
+    pressure= barometer.getPressure();  // read calibrated pressure value in Pascals (Pa)
 
     altitude=barometer.getAltitude(pressure);
   

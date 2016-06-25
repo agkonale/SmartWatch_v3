@@ -14,16 +14,13 @@ void DRV2605_Setup(Adafruit_DRV2605 &drv);
 //param 4: delay_interval (in ms)
 void Play_Effects(Adafruit_DRV2605 &drv, uint8_t* effect_id,uint8_t num,uint8_t delay_interval);
 
-//For Alarm
-//Customisable via EEPROM
+//For Alarm   //Customisable via EEPROM
 void Vibrate_A(Adafruit_DRV2605 &drv,uint8_t* buf,uint8_t num);
 
-//Vibe alert for incoming Call
-//Fixed Pattern
+//Vibe alert for incoming Call  //Fixed Pattern
 void Vibrate_C(Adafruit_DRV2605 &drv);
 
-//Vibe alert for recieved Message
-//Fixed Pattern
+//Vibe alert for recieved Message //Fixed Pattern
 void Vibrate_M(Adafruit_DRV2605 &drv);
 
 #endif

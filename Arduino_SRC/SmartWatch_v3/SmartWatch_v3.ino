@@ -15,10 +15,8 @@ volatile uint8_t WATCH_MODE=NORMAL_MODE;
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #define SCREEN_REFRESH_INTERVAL 200 //ms
-
-//Awake time counter(1u = SCREEN_REFRESH_INTERVAL)
-uint8_t count=0;
-#define count_MAX 50 //10 sec
+uint8_t count=0;      //Awake time counter(1u = SCREEN_REFRESH_INTERVAL)
+#define count_MAX 50  //10 sec
 
 //For MPU6050 Setup
 bool NORMAL_SETUP_FLAG=false;
@@ -30,16 +28,14 @@ bool PEDOMETER_SETUP_FLAG=false;
 #define COMPASS_PAGE          0X2
 #define BLANK_PAGE            0xA
 
-//Current page pointer
-volatile uint8_t Page_ptr=HOME_PAGE;
+volatile uint8_t Page_ptr=HOME_PAGE;  //Current page pointer
 
-//To check if data is recieved from REMOTE
-bool isReceived = false;     
-//Connection Status with Android phone
-bool is_Connected=false; 
+bool isReceived = false;  //To check if data is recieved from REMOTE  
+bool is_Connected=false;  //Connection Status with Android phone
 
-/////////////////////////////////////////////////////////PINS//////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////PINS///////////////////////////////////////////////////////////////
 
+//A4 (SDA), A5 (SCL)
 #define ALARM_INTPIN 2                //Alarm Interrupt Pin (INT0)
 #define ACC_INTPIN 3                  //For counting steps/Wake on Tilt(other applications requiring accelerometer)  (INT1) 
 
@@ -54,25 +50,22 @@ bool is_Connected=false;
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-volatile bool ALRM_ON_OFF = false;
+volatile bool ALRM_ON_OFF = false;  //to disarm alarm
 volatile bool ALRM_TRIGGERED = false;
 bool is_ALRM_SET =false;
 
-//Waking up screen via INT(button/Acc)
-volatile bool Wake_via_INT=false;
+volatile bool Wake_via_INT=false; //Waking up screen via INT(button/Acc)
 
 /////////////////////////////////////////////////////////////WDT/////////////////////////////////////////////////////////////////
 
 ISR (WDT_vect) 
 {
-    wdt_disable();  // disable watchdog
-    
+    wdt_disable();  // disable watchdog   
 }  // end of WDT_vect
 
 ///////////////////////////////////////////////////////////DATA////////////////////////////////////////////////////////////////
 
 USER_BIODATA USER;
-
 Pedometer_Data Pedo_DATA;
 
 /////////////////////////////////////////////////////Peripheral Devices///////////////////////////////////////////////////////
@@ -80,16 +73,14 @@ Pedometer_Data Pedo_DATA;
 DS3231 RTC;
 RTCDateTime Time;
 
-// A structure for controlling I2C OLED (128X64)
-U8GLIB_SSD1306_128X64 u8g(U8G_I2C_OPT_NONE|U8G_I2C_OPT_DEV_0);  // I2C / TWI 
+U8GLIB_SSD1306_128X64 u8g(U8G_I2C_OPT_NONE|U8G_I2C_OPT_DEV_0);  // A structure for controlling I2C OLED (128X64)  // I2C / TWI 
  
-// A structure for controlling Haptic driver DRV2605
-Adafruit_DRV2605 drv;
+Adafruit_DRV2605 drv; // A structure for controlling Haptic driver DRV2605
 #define alrm_vibe_count_MAX 20
 
-//11 DOF sensor GY87
-Sensors GY_S;
- 
+Sensors GY_S; //11 DOF sensor GY87
+volatile bool ACC_INT_FLAG =false;
+
 ////////////////////////////////////////////////////////ISR////////////////////////////////////////////////////////////////////
 //Keep these as small as possible!!
 
@@ -112,7 +103,8 @@ ISR (PCINT0_vect)
     }
   
     else if(digitalRead(Button2_INTPIN)==0)
-    {
+    {   
+        WATCH_MODE=NORMAL_MODE;
         Page_ptr=COMPASS_PAGE;    
     }
 
@@ -128,7 +120,7 @@ void ISR_ALARM()
 //For Acc
 void ISR_Update_StepCount()
 {
-    Pedo_DATA.Update_StepCount();
+    ACC_INT_FLAG=true;
 }
 
 void ISR_Wake_Via_Acc()
@@ -138,22 +130,20 @@ void ISR_Wake_Via_Acc()
 }
 
 
-/////////////////////////////////////////////////////////////////Li-Po Battery///////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////Li-Po Battery Parameters///////////////////////////////////////////////////////
  
 float Battery_Voltage;
 uint8_t Battery_Lvl;
-//Charging complete status
-bool is_Charged=false;
-//USB charging status
-bool is_Charging=false;
+bool is_Charged=false;  //Charging complete status
+bool is_Charging=false; //USB charging status
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
  
 void setup() 
 {
-    //Set Baud Rate for BLE HM10
-    //Chosen to match Bootloader BAUD Rate of Arduino PRO-MINI for OTA programming
-    Serial.begin(57600);
+    
+    //Set Baud Rate for BLE HM10 
+    Serial.begin(57600);  //Chosen to match Bootloader BAUD Rate of Arduino PRO-MINI for OTA programming
   
     pinMode(ON_OFF_INTPIN, INPUT_PULLUP);
     pinMode(Button1_INTPIN, INPUT_PULLUP);
@@ -172,37 +162,29 @@ void setup()
     digitalWrite(11, LOW);
     digitalWrite(12, LOW);
     
-    cli();    // switch interrupts off while messing with their settings  
-    PCICR =0x01;          // Enable PCINT0 interrupt
-    PCMSK0 = 0b00000111;  //Enable interrupts on Pins 8,9,10
-    sei();    // turn interrupts back on
+    cli();                    // switch interrupts off while messing with their settings  
+    PCICR =0x01;              // Enable PCINT0 interrupt
+    PCMSK0 = 0b00000111;      //Enable interrupts on Pins 8,9,10
+    sei();                    // turn interrupts back on
     
     //Personalise
     USER.Set_BIODATA("Abhishek  ",176,20,0,82);
-  
-    //Use internal precise 1v1 reference voltage for measuring battery volatge
-    analogReference(INTERNAL);
+     
+    analogReference(INTERNAL);  //Use internal precise 1v1 reference voltage for measuring battery volatge
     
-    // Initialize the I2C bus
     Wire.begin();
-  
-    //Setup DRV2605
-    DRV2605_Setup(drv);
-    
-    //DS3231 alarm INT
-    attachInterrupt (0,ISR_ALARM,FALLING);
+      
+    DRV2605_Setup(drv); //Setup DRV2605
+        
+    attachInterrupt (0,ISR_ALARM,FALLING);  //DS3231 alarm INT
 
     //Load alarms for present day  
     Time=RTC.getDateTime();
-    uint8_t temp_day= Time.dayOfWeek;
-    // setAlarm1(Date or Day, Hour, Minute, Second, Mode, Armed = true)
-    RTC.setAlarm1(temp_day,EEPROM.read(temp_day),EEPROM.read(temp_day+1), 0,DS3231_MATCH_DY_H_M_S);
-    // setAlarm2(Date or Day, Hour, Minute, Mode, Armed = true)
-    RTC.setAlarm2(temp_day,EEPROM.read(temp_day+2),EEPROM.read(temp_day+3),DS3231_MATCH_DY_H_M);
-
-    //Set Display font
-    //u8g.setFont(u8g_font_fur14r);
-    u8g.setFont(u8g_font_profont15r);
+    uint8_t temp_day= Time.dayOfWeek;   
+    RTC.setAlarm1(temp_day,EEPROM.read(temp_day),EEPROM.read(temp_day+1), 0,DS3231_MATCH_DY_H_M_S); // setAlarm1(Date or Day, Hour, Minute, Second, Mode, Armed = true)    
+    RTC.setAlarm2(temp_day,EEPROM.read(temp_day+2),EEPROM.read(temp_day+3),DS3231_MATCH_DY_H_M);  // setAlarm2(Date or Day, Hour, Minute, Mode, Armed = true)
+  
+    u8g.setFont(u8g_font_profont15r); //Set Display font
 
     //Launch Animation
     u8g.firstPage();
@@ -226,7 +208,7 @@ void setup()
     do 
     {
         setContrast(0xFF);        
-        drawLOGO(u8g);
+        u8g.drawBitmapP( 16, 0, 12, 64, IMG_logo_96x64);
         delay(3000);
         setContrast(0x02);
     } while ( u8g.nextPage() );
@@ -241,36 +223,28 @@ void loop()
      
     Battery_Voltage=Get_Battery_Voltage(A0);
     Battery_Lvl=Get_Battery_Lvl(Battery_Voltage);
-
-    
-    uint8_t temp_day=Time.dayOfWeek; 
-    
+ 
+    uint8_t temp_day=Time.dayOfWeek;     
     Time=RTC.getDateTime();
-
     //Loading stored alarms for new day 
     if(temp_day!=Time.dayOfWeek and is_ALRM_SET==true)
     {    
-        temp_day= Time.dayOfWeek;
-        // setAlarm1(Date or Day, Hour, Minute, Second, Mode, Armed = true)
-        RTC.setAlarm1(temp_day,EEPROM.read(temp_day),EEPROM.read(temp_day+1),0,DS3231_MATCH_DY_H_M_S);
-        // setAlarm2(Date or Day, Hour, Minute, Mode, Armed = true)
-        RTC.setAlarm2(temp_day,EEPROM.read(temp_day+2),EEPROM.read(temp_day+3),DS3231_MATCH_DY_H_M);
-
+        temp_day= Time.dayOfWeek;       
+        RTC.setAlarm1(temp_day,EEPROM.read(temp_day),EEPROM.read(temp_day+1),0,DS3231_MATCH_DY_H_M_S);  // setAlarm1(Date or Day, Hour, Minute, Second, Mode, Armed = true)       
+        RTC.setAlarm2(temp_day,EEPROM.read(temp_day+2),EEPROM.read(temp_day+3),DS3231_MATCH_DY_H_M);  // setAlarm2(Date or Day, Hour, Minute, Mode, Armed = true)
     } 
       
     if(ALRM_TRIGGERED)
     {      
-        //Display Alarm Icon  
-        u8g.drawBitmapP(80,16 ,4 ,32,ICON_BITMAP_Alarm_32x32);
-        //Time=RTC.getDateTime();
+         
+        u8g.drawBitmapP(80,16 ,4 ,32,ICON_BITMAP_Alarm_32x32);  // setAlarm2(Date or Day, Hour, Minute, Mode, Armed = true)
         displayTime_Digital(u8g,Time);
 
         //Reset flag
         ALRM_TRIGGERED=false;             
         ALRM_ON_OFF = true;
-        
-        //cylce counter
-        uint8_t temp=0;
+               
+        uint8_t temp=0; //cylce counter
         //Load User Specific Alarm waveform stored in EEPROM
         uint8_t num=EEPROM.read(addDRVnum);
         uint8_t buf[7];
@@ -302,14 +276,12 @@ void loop()
                 PEDOMETER_SETUP_FLAG=false; 
                 NORMAL_SETUP_FLAG=true; 
             }
-        
-        // Receive data from remote and parse
-        isReceived = receiveBluetoothData();
+                
+        isReceived = receiveBluetoothData();  // Receive data from remote and parse
       
         // If data doesn't arrive
         if(!isReceived)
-        {
-          
+        {          
             is_Charging=digitalRead(USB_CHARGING_STAT_PIN);
             is_Connected=digitalRead(BLE_CONNECTION_STAT_PIN);
         
@@ -331,15 +303,9 @@ void loop()
             }
           
             else
-            {      
-                //Turn off Display
-                Display(BLANK_PAGE);
-                //Sleep for 2s
-                //  1 second:  0b000110
-                //  2 seconds: 0b000111
-                //  4 seconds: 0b100000
-                //  8 seconds: 0b100001
-                Sleep(0b000111);      
+            {                    
+                Display(BLANK_PAGE);  //Turn off Display
+                Sleep(0b000111);  //Sleep for 2s    
             }  
         
       }
@@ -349,8 +315,8 @@ void loop()
   
   
     if(WATCH_MODE==PEDOMETER_MODE)
-    {
-      
+    { 
+          
         if(PEDOMETER_SETUP_FLAG==false)
         {
             GY_S.Initialize(PEDOMETER_MODE);
@@ -359,24 +325,40 @@ void loop()
             PEDOMETER_SETUP_FLAG=true; 
         }
         
-        //PedoMeter algorithm
+        //PedoMeter algorithm       
+        unsigned long T1,T2,deltaT;
+        
+        if(ACC_INT_FLAG)
+        {   
+            ACC_INT_FLAG=false;            
+            deltaT = millis()-T1;
+            T1=millis();
+            
+            //assume that people can run as rapidly as five steps per second and walk as slowly as one step every two seconds. delta T(0.2 -2 sec)
+            if(deltaT>200 and deltaT<2000)
+            {   
+                Pedo_DATA.Update_StepCount();
+            }  
 
-        Pedo_DATA.Update_Steps_per_2s();
-        Pedo_DATA.Update_Stride_Length();
-        Pedo_DATA.Update_Speed();
-        Pedo_DATA.Update_Calories();
-        Pedo_DATA.Update_KM(); 
-    
-        //Display data on screen
-        Display(Page_ptr);
-           
-        int i=0;
-        while(i<20)
-        {
-            i++;
-            delay(50);
+            else
+            {   
+                GY_S.Update_Threshold();  //Dynamic Threshold Update
+            }
         }
         
+        if(millis()-T2 >2000)
+        {   
+            T2 =millis();
+            Pedo_DATA.Update_Steps_per_2s();
+            Pedo_DATA.Update_Stride_Length();
+            Pedo_DATA.Update_Speed();
+            Pedo_DATA.Update_Calories();
+            Pedo_DATA.Update_KM();               
+        }
+                
+        Display(Page_ptr);  //Display data on screen
+        delay(SCREEN_REFRESH_INTERVAL);
+                          
   }
 
 }
@@ -389,7 +371,6 @@ void Display(uint8_t Page_ptr)
     {
         //////////////////////////////////////////////////////////HOME-PAGE///////////////////////////////////////////////////////////////////      
         case HOME_PAGE:
-        //Time=RTC.getDateTime();
         displayTime_Analog(u8g,Time);
         displayTime_Digital(u8g,Time);
         displayHomeScreenData(u8g,GY_S);
@@ -429,11 +410,9 @@ void Display(uint8_t Page_ptr)
             u8g.drawBitmapP(48, 0, 2, 16, ICON_BITMAP_Alarm_16x16);
         }
         break;
-
-       
+     
         //////////////////////////////////////////////////////////PEDOMETER-PAGE//////////////////////////////////////////////////////////////
         case PEDOMETER_PAGE:
-        //Time=RTC.getDateTime();
         displayTime_Digital(u8g,Time);
         displayPedometerData(u8g,Pedo_DATA); 
           
@@ -472,9 +451,7 @@ void Display(uint8_t Page_ptr)
         break;
                       
     }
-  
-     
-        
+          
 }
 
 
@@ -487,14 +464,12 @@ void Display(uint8_t Page_ptr)
 // Parsing packet according to current mode
 boolean receiveBluetoothData() 
 {
-    bool isTransactionEnded = false;
-    
+    bool isTransactionEnded = false;    
     while(!isTransactionEnded) 
     {
         if(Serial.available()) 
         {
             byte c = Serial.read();
-
             switch(TRANSACTION_POINTER)
             {
                 case TR_MODE_IDLE:
@@ -545,14 +520,8 @@ boolean receiveBluetoothData()
 
 
 
-
-
-    
-
-
 void parseCommand(byte c) 
 {
-
     switch(c)
     {
         case CMD_TYPE_SET_TIME:
@@ -567,18 +536,16 @@ void parseCommand(byte c)
 
         case CMD_TYPE_SET_ALARM_1:
         TRANSACTION_POINTER = TR_MODE_WAIT_COMPLETE;
-        TR_COMMAND = c;
-        // setAlarm1(Date or Day, Hour, Minute, Second, Mode, Armed = true)  
-        RTC.setAlarm1(alarm_day,alarm_hour,alarm_minute,0,DS3231_MATCH_DY_H_M_S);
+        TR_COMMAND = c;       
+        RTC.setAlarm1(alarm_day,alarm_hour,alarm_minute,0,DS3231_MATCH_DY_H_M_S); // setAlarm1(Date or Day, Hour, Minute, Second, Mode, Armed = true)  
         EEPROM.write(alarm_day*4, alarm_hour);
         EEPROM.write(alarm_day*4+1, alarm_minute);
         break;
 
         case CMD_TYPE_SET_ALARM_2:
         TRANSACTION_POINTER = TR_MODE_WAIT_COMPLETE;
-        TR_COMMAND = c;
-        // setAlarm2(Date or Day, Hour, Minute, Mode, Armed = true)
-        RTC.setAlarm2(alarm_day,alarm_hour,alarm_minute,DS3231_MATCH_DY_H_M);
+        TR_COMMAND = c;        
+        RTC.setAlarm2(alarm_day,alarm_hour,alarm_minute,DS3231_MATCH_DY_H_M); // setAlarm2(Date or Day, Hour, Minute, Mode, Armed = true)
         EEPROM.write(alarm_day*4+2, alarm_hour);
         EEPROM.write(alarm_day*4+3, alarm_minute);        
         break;

@@ -1,9 +1,7 @@
 #ifndef BITMAP_H
 #define BITMAP_H
 
-//device logo (96 X 64)
-//Generated using LCD Assistant
-//Horizontal Byte Orientation
+//device logo (96 X 64)   //Generated using LCD Assistant   //Horizontal Byte Orientation   
 //Refer : https://learn.adafruit.com/monochrome-oled-breakouts/arduino-library-and-examples
 
 const unsigned char PROGMEM IMG_logo_96x64[] = 

@@ -18,12 +18,13 @@ PEDOMETER_MODE 1
 **/
 
 //For NORMAL_MODE
-#define threshold1  5
+#define threshold_N  5
 #define detcdur1    10
 
 //For PEDOMETER_MODE
-#define threshold2  5
-#define detcdur2    10
+#define threshold_P_MAX  10
+#define threshold_P_MIN  5
+#define detcdur2    20
 
 
 class Sensors 
@@ -47,9 +48,13 @@ class Sensors
     // AD0 high = 0x69
     MPU6050 accelgyro;
     //MPU6050 accelgyro(0x69); // <-- use for AD0 high  
+    uint8_t threshold_P;
+    bool threshold_flag=true;
       
     public:
     void Initialize(uint8_t Mode);
+
+    void Update_Threshold();
     
     //in degrees 0:North
     float Get_Compass_Reading();

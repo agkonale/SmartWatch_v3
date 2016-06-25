@@ -17,7 +17,6 @@
 #define clockCentreY  32 // used to fix the centre the analog clock
 
 void setContrast(uint8_t CONTRAST);
-void drawLOGO(U8GLIB_SSD1306_128X64 &u8g);
 
 void displayTime_Analog(U8GLIB_SSD1306_128X64 &u8g,RTCDateTime &Time);
 void displayTime_Digital(U8GLIB_SSD1306_128X64 &u8g,RTCDateTime &Time);
